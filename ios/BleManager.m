@@ -60,12 +60,13 @@ bool hasListeners;
         
         manager.delegate = nil;
     }
+    @synchronized(peripherals) {
+        for (CBPeripheral* p in peripherals) {
+            p.delegate = nil;
+        }
     
-    for (CBPeripheral* p in peripherals) {
-        p.delegate = nil;
+        peripherals = [NSMutableSet set];
     }
-    
-    peripherals = [NSMutableSet set];
 }
 
 +(BOOL)requiresMainQueueSetup
@@ -112,16 +113,20 @@ bool hasListeners;
     NSString *key = [self keyForPeripheral: peripheral andCharacteristic:characteristic];
     
     if (characteristic.isNotifying) {
-        NSLog(@"Notification began on %@", characteristic.UUID);
         RCTResponseSenderBlock notificationCallback = [notificationCallbacks objectForKey:key];
-        notificationCallback(@[]);
-        [notificationCallbacks removeObjectForKey:key];
+        if (notificationCallback != nil) {
+          NSLog(@"Notification began on %@", characteristic.UUID);
+          notificationCallback(@[]);
+          [notificationCallbacks removeObjectForKey:key];
+        }
     } else {
         // Notification has stopped
-        NSLog(@"Notification ended on %@", characteristic.UUID);
         RCTResponseSenderBlock stopNotificationCallback = [stopNotificationCallbacks objectForKey:key];
-        stopNotificationCallback(@[]);
-        [stopNotificationCallbacks removeObjectForKey:key];
+        if (stopNotificationCallback != nil) {
+            NSLog(@"Notification ended on %@", characteristic.UUID);
+            stopNotificationCallback(@[]);
+            [stopNotificationCallbacks removeObjectForKey:key];
+        }
     }
 }
 
@@ -187,14 +192,15 @@ bool hasListeners;
 - (CBPeripheral*)findPeripheralByUUID:(NSString*)uuid {
     
     CBPeripheral *peripheral = nil;
-    
-    for (CBPeripheral *p in peripherals) {
+    @synchronized(peripherals) {
+        for (CBPeripheral *p in peripherals) {
         
-        NSString* other = p.identifier.UUIDString;
+            NSString* other = p.identifier.UUIDString;
         
-        if ([uuid isEqualToString:other]) {
-            peripheral = p;
-            break;
+            if ([uuid isEqualToString:other]) {
+                peripheral = p;
+                break;
+            }
         }
     }
     return peripheral;
@@ -249,10 +255,12 @@ RCT_EXPORT_METHOD(getConnectedPeripherals:(NSArray *)serviceUUIDStrings callback
 
     NSMutableArray *foundedPeripherals = [NSMutableArray array];
     if ([serviceUUIDs count] == 0){
-        for(CBPeripheral *peripheral in peripherals){
-            if([peripheral state] == CBPeripheralStateConnected){
-                NSDictionary * obj = [peripheral asDictionary];
-                [foundedPeripherals addObject:obj];
+        @synchronized(peripherals) {
+            for(CBPeripheral *peripheral in peripherals){
+                if([peripheral state] == CBPeripheralStateConnected){
+                    NSDictionary * obj = [peripheral asDictionary];
+                    [foundedPeripherals addObject:obj];
+                }
             }
         }
     } else {
@@ -394,7 +402,7 @@ RCT_EXPORT_METHOD(connect:(NSString *)peripheralUUID callback:(nonnull RCTRespon
     }
 }
 
-RCT_EXPORT_METHOD(disconnect:(NSString *)peripheralUUID  callback:(nonnull RCTResponseSenderBlock)callback)
+RCT_EXPORT_METHOD(disconnect:(NSString *)peripheralUUID force:(BOOL)force callback:(nonnull RCTResponseSenderBlock)callback)
 {
     CBPeripheral *peripheral = [self findPeripheralByUUID:peripheralUUID];
     if (peripheral) {
@@ -692,19 +700,30 @@ RCT_EXPORT_METHOD(readRSSI:(NSString *)deviceUUID callback:(nonnull RCTResponseS
     
 }
 
-RCT_EXPORT_METHOD(retrieveServices:(NSString *)deviceUUID callback:(nonnull RCTResponseSenderBlock)callback)
+RCT_EXPORT_METHOD(retrieveServices:(NSString *)deviceUUID services:(NSArray<NSString *> *)services callback:(nonnull RCTResponseSenderBlock)callback)
 {
-    NSLog(@"retrieveServices");
+    NSLog(@"retrieveServices %@", services);
     
     CBPeripheral *peripheral = [self findPeripheralByUUID:deviceUUID];
     
     if (peripheral && peripheral.state == CBPeripheralStateConnected) {
         [retrieveServicesCallbacks setObject:callback forKey:[peripheral uuidAsString]];
-        [peripheral discoverServices:nil];
+        
+        NSMutableArray<CBUUID *> *uuids = [NSMutableArray new];
+        for ( NSString *string in services ) {
+            CBUUID *uuid = [CBUUID UUIDWithString:string];
+            [uuids addObject:uuid];
+        }
+        
+        if ( uuids.count > 0 ) {
+            [peripheral discoverServices:uuids];
+        } else {
+            [peripheral discoverServices:nil];
+        }
+        
     } else {
         callback(@[@"Peripheral not found or not connected"]);
     }
-    
 }
 
 RCT_EXPORT_METHOD(startNotification:(NSString *)deviceUUID serviceUUID:(NSString*)serviceUUID  characteristicUUID:(NSString*)characteristicUUID callback:(nonnull RCTResponseSenderBlock)callback)
@@ -813,7 +832,7 @@ RCT_EXPORT_METHOD(requestMTU:(NSString *)deviceUUID mtu:(NSInteger)mtu callback:
     RCTResponseSenderBlock readRSSICallback = [readRSSICallbacks objectForKey: key];
     if (readRSSICallback) {
         readRSSICallback(@[[NSNull null], [NSNumber numberWithInteger:[rssi integerValue]]]);
-        [readRSSICallbacks removeObjectForKey:readRSSICallback];
+        [readRSSICallbacks removeObjectForKey:key];
     }
 }
 
