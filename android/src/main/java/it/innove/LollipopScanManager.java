@@ -8,7 +8,6 @@ import android.bluetooth.le.ScanResult;
 import android.bluetooth.le.ScanSettings;
 import android.os.Build;
 import android.os.ParcelUuid;
-import android.support.annotation.RequiresApi;
 import android.util.Log;
 import com.facebook.react.bridge.*;
 
@@ -17,7 +16,6 @@ import java.util.List;
 
 import static com.facebook.react.bridge.UiThreadUtil.runOnUiThread;
 
-@RequiresApi(Build.VERSION_CODES.LOLLIPOP)
 public class LollipopScanManager extends ScanManager {
 
 	public LollipopScanManager(ReactApplicationContext reactContext, BleManager bleManager) {
@@ -37,14 +35,14 @@ public class LollipopScanManager extends ScanManager {
     public void scan(ReadableArray serviceUUIDs, final int scanSeconds, ReadableMap options,  Callback callback) {
         ScanSettings.Builder scanSettingsBuilder = new ScanSettings.Builder();
         List<ScanFilter> filters = new ArrayList<>();
-        
+
         scanSettingsBuilder.setScanMode(options.getInt("scanMode"));
-        
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             scanSettingsBuilder.setNumOfMatches(options.getInt("numberOfMatches"));
             scanSettingsBuilder.setMatchMode(options.getInt("matchMode"));
         }
-        
+
         if (serviceUUIDs.size() > 0) {
             for(int i = 0; i < serviceUUIDs.size(); i++){
 				ScanFilter filter = new ScanFilter.Builder().setServiceUuid(new ParcelUuid(UUIDHelper.uuidFromString(serviceUUIDs.getString(i)))).build();
@@ -52,20 +50,20 @@ public class LollipopScanManager extends ScanManager {
                 Log.d(bleManager.LOG_TAG, "Filter service: " + serviceUUIDs.getString(i));
             }
         }
-        
+
         getBluetoothAdapter().getBluetoothLeScanner().startScan(filters, scanSettingsBuilder.build(), mScanCallback);
         if (scanSeconds > 0) {
             Thread thread = new Thread() {
                 private int currentScanSession = scanSessionId.incrementAndGet();
-                
+
                 @Override
                 public void run() {
-                    
+
                     try {
                         Thread.sleep(scanSeconds * 1000);
                     } catch (InterruptedException ignored) {
                     }
-                    
+
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
@@ -80,9 +78,9 @@ public class LollipopScanManager extends ScanManager {
                             }
                         }
                     });
-                    
+
                 }
-                
+
             };
             thread.start();
         }

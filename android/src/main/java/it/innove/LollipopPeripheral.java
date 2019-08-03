@@ -4,7 +4,6 @@ import android.bluetooth.BluetoothDevice;
 import android.bluetooth.le.ScanRecord;
 import android.os.Build;
 import android.os.ParcelUuid;
-import android.support.annotation.RequiresApi;
 
 import com.facebook.react.bridge.Arguments;
 import com.facebook.react.bridge.ReactApplicationContext;
@@ -14,7 +13,6 @@ import com.facebook.react.bridge.WritableMap;
 
 import java.util.Map;
 
-@RequiresApi(Build.VERSION_CODES.LOLLIPOP)
 public class LollipopPeripheral extends Peripheral {
 
 	private ScanRecord advertisingData;
