@@ -28,7 +28,8 @@ declare module 'react-native-ble-manager' {
 		numberOfMatches?: number;
 		matchMode?: number;
 		scanMode?: number;
-    	}
+		reportDelay?: number;
+	}
     
 	export function scan(serviceUUIDs: string[], seconds: number, allowDuplicates?: boolean, options?: ScanOptions): Promise<void>;
 	export function stopScan(): Promise<void>;
@@ -44,8 +45,8 @@ declare module 'react-native-ble-manager' {
 
 	export function readRSSI(peripheralID: string): Promise<void>
 
-	export function getConnectedPeripherals(serviceUUIDs: string[]): Promise<any[]>
-	export function getDiscoveredPeripherals(): Promise<any[]>
+	export function getConnectedPeripherals(serviceUUIDs: string[]): Promise<Peripheral[]>
+	export function getDiscoveredPeripherals(): Promise<Peripheral[]>
 	export function isPeripheralConnected(peripheralID: string, serviceUUIDs: string[]): Promise<boolean>
 
 	// [Android only API 21+]
@@ -64,7 +65,7 @@ declare module 'react-native-ble-manager' {
 
 	export function createBond(peripheralID: string): Promise<void>
 	export function removeBond(peripheralID: string): Promise<void>
-	export function getBondedPeripherals(): Promise<void>
+	export function getBondedPeripherals(): Promise<Peripheral[]>
 	export function removePeripheral(peripheralID: string): Promise<void>
 
 	export interface PeripheralInfo {

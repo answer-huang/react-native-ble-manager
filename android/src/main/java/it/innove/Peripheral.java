@@ -153,6 +153,8 @@ public class Peripheral extends BluetoothGattCallback {
 				advertising.putString("localName", name);
 
 			advertising.putMap("manufacturerData", byteArrayToWritableMap(advertisingDataBytes));
+
+			// No scanResult to access so we can't check if peripheral is connectable
 			advertising.putBoolean("isConnectable", true);
 
 			map.putMap("advertising", advertising);
@@ -646,10 +648,12 @@ public class Peripheral extends BluetoothGattCallback {
 
 				if (writeQueue.size() > 0) {
 					callback.invoke("You have already an queued message");
+					return;
 				}
 
 				if (writeCallback != null) {
 					callback.invoke("You're already writing");
+					return;
 				}
 
 				if (writeQueue.size() == 0 && writeCallback == null) {

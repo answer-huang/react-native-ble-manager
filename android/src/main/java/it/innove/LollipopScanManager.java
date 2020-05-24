@@ -44,6 +44,10 @@ public class LollipopScanManager extends ScanManager {
             scanSettingsBuilder.setMatchMode(options.getInt("matchMode"));
         }
 
+        if (!options.isNull("reportDelay")) {
+            scanSettingsBuilder.setReportDelay(options.getInt("reportDelay"));
+        }
+        
         if (serviceUUIDs.size() > 0) {
             for(int i = 0; i < serviceUUIDs.size(); i++){
 				ScanFilter filter = new ScanFilter.Builder().setServiceUuid(new ParcelUuid(UUIDHelper.uuidFromString(serviceUUIDs.getString(i)))).build();
@@ -99,7 +103,7 @@ public class LollipopScanManager extends ScanManager {
 
                     LollipopPeripheral peripheral = (LollipopPeripheral) bleManager.getPeripheral(result.getDevice());
                     if (peripheral == null) {
-                        peripheral = new LollipopPeripheral(result.getDevice(), result.getRssi(), result.getScanRecord(), bleManager.getReactContext());
+                        peripheral = new LollipopPeripheral(bleManager.getReactContext(), result);
                     } else {
                         peripheral.updateData(result.getScanRecord());
                         peripheral.updateRssi(result.getRssi());
