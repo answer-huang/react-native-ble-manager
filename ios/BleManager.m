@@ -642,7 +642,8 @@ RCT_EXPORT_METHOD(writeWithoutResponse:(NSString *)deviceUUID serviceUUID:(NSStr
                 
                 offset += thisChunkSize;
                 [peripheral writeValue:chunk forCharacteristic:characteristic type:CBCharacteristicWriteWithoutResponse];
-                [NSThread sleepForTimeInterval:(queueSleepTime / 1000)];
+		NSTimeInterval sleepTimeSeconds = (NSTimeInterval) queueSleepTime / 1000;
+                [NSThread sleepForTimeInterval: sleepTimeSeconds];
             } while (offset < length);
             
             NSLog(@"Message to write(%lu): %@ ", (unsigned long)[dataMessage length], [dataMessage hexadecimalString]);
@@ -976,7 +977,11 @@ RCT_EXPORT_METHOD(requestMTU:(NSString *)deviceUUID mtu:(NSInteger)mtu callback:
     }
     
     if (hasListeners) {
-        [self sendEventWithName:@"BleManagerDisconnectPeripheral" body:@{@"peripheral": [peripheral uuidAsString]}];
+			if (error) {
+				[self sendEventWithName:@"BleManagerDisconnectPeripheral" body:@{@"peripheral": [peripheral uuidAsString], @"domain": [error domain], @"code": @(error.code)}];
+			} else {
+				[self sendEventWithName:@"BleManagerDisconnectPeripheral" body:@{@"peripheral": [peripheral uuidAsString]}];
+			}
     }
 }
 
@@ -992,8 +997,13 @@ RCT_EXPORT_METHOD(requestMTU:(NSString *)deviceUUID mtu:(NSInteger)mtu callback:
     [retrieveServicesLatches setObject:servicesForPeriperal forKey:[peripheral uuidAsString]];
     for (CBService *service in peripheral.services) {
         NSLog(@"Service %@ %@", service.UUID, service.description);
-        [peripheral discoverCharacteristics:nil forService:service]; // discover all is slow
+        [peripheral discoverIncludedServices:nil forService:service]; // discover included services
+        [peripheral discoverCharacteristics:nil forService:service]; // discover characteristics for service
     }
+}
+
+- (void)peripheral:(CBPeripheral *)peripheral didDiscoverIncludedServicesForService:(CBService *)service error:(NSError *)error {
+    [peripheral discoverCharacteristics:nil forService:service]; // discover characteristics for included service
 }
 
 - (void)peripheral:(CBPeripheral *)peripheral didDiscoverCharacteristicsForService:(CBService *)service error:(NSError *)error {
