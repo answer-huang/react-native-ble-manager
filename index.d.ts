@@ -28,6 +28,8 @@ declare module "react-native-ble-manager" {
     matchMode?: number;
     scanMode?: number;
     reportDelay?: number;
+    phy?: number;
+    legacy?: boolean;
   }
 
   export function scan(
@@ -110,7 +112,7 @@ declare module "react-native-ble-manager" {
   // [Android only]
   export function refreshCache(peripheralID: string): Promise<void>;
   // [Android only API 21+]
-  export function requestMTU(peripheralID: string, mtu: number): Promise<void>;
+  export function requestMTU(peripheralID: string, mtu: number): Promise<number>;
 
   export function createBond(
     peripheralID: string,
@@ -120,7 +122,9 @@ declare module "react-native-ble-manager" {
   export function getBondedPeripherals(): Promise<Peripheral[]>;
   export function removePeripheral(peripheralID: string): Promise<void>;
 
-  
+  // [Android only]
+  export function setName(name: string): void;
+
   export interface Service {
     uuid: string;
   }
@@ -147,7 +151,7 @@ declare module "react-native-ble-manager" {
     characteristic: string;
     service: string;
     descriptors?: Descriptor[];
-    
+
   }
 
   export interface PeripheralInfo extends Peripheral {
