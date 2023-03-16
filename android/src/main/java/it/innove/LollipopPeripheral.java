@@ -16,7 +16,6 @@ import com.facebook.react.bridge.WritableMap;
 
 import java.util.Map;
 
-@RequiresApi(Build.VERSION_CODES.LOLLIPOP)
 public class LollipopPeripheral extends Peripheral {
 
     private ScanRecord advertisingData;

@@ -30,6 +30,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 @RequiresApi(Build.VERSION_CODES.LOLLIPOP)
+import static com.facebook.react.bridge.UiThreadUtil.runOnUiThread;
+
 public class LollipopScanManager extends ScanManager {
 
     public LollipopScanManager(ReactApplicationContext reactContext, BleManager bleManager) {
@@ -92,6 +94,7 @@ public class LollipopScanManager extends ScanManager {
             }
         }
 
+<<<<<<< HEAD
         if (options.hasKey("exactAdvertisingName")) {
             String expectedName = options.getString("exactAdvertisingName");
             Log.d(BleManager.LOG_TAG, "Filter on advertising name:" + expectedName);
@@ -99,6 +102,8 @@ public class LollipopScanManager extends ScanManager {
             filters.add(filter);
         }
 
+=======
+>>>>>>> a153ede4d21b2b71d3c4a5b52a9ae1ed220bf54f
         getBluetoothAdapter().getBluetoothLeScanner().startScan(filters, scanSettingsBuilder.build(), mScanCallback);
 
         if (scanSeconds > 0) {
