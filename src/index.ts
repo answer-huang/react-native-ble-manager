@@ -5,6 +5,7 @@ import {
   BleScanMatchMode,
   BleScanMode,
   BleState,
+  ConnectOptions,
   ConnectionPriority,
   Peripheral,
   PeripheralInfo,
@@ -34,6 +35,32 @@ class BleManager {
         peripheralId,
         serviceUUID,
         characteristicUUID,
+        (error: string | null, data: number[]) => {
+          if (error) {
+            reject(error);
+          } else {
+            fulfill(data);
+          }
+        }
+      );
+    });
+  }
+
+  /**
+   * 
+   * @param peripheralId 
+   * @param serviceUUID 
+   * @param characteristicUUID 
+   * @param descriptorUUID
+   * @returns data as an array of numbers (which can be converted back to a Uint8Array (ByteArray) using something like [Buffer.from()](https://github.com/feross/buffer))
+   */
+  readDescriptor(peripheralId: string, serviceUUID: string, characteristicUUID: string, descriptorUUID: string) {
+    return new Promise<number[]>((fulfill, reject) => {
+      bleManager.readDescriptor(
+        peripheralId,
+        serviceUUID,
+        characteristicUUID,
+        descriptorUUID,
         (error: string | null, data: number[]) => {
           if (error) {
             reject(error);
@@ -174,9 +201,12 @@ class BleManager {
     });
   }
 
-  connect(peripheralId: string) {
+  connect(peripheralId: string, options?: ConnectOptions) {
     return new Promise<void>((fulfill, reject) => {
-      bleManager.connect(peripheralId, (error: string | null) => {
+      if (!options) {
+        options = {};
+      }
+      bleManager.connect(peripheralId, options, (error: string | null) => {
         if (error) {
           reject(error);
         } else {
@@ -564,6 +594,43 @@ class BleManager {
   setName(name: string) {
     bleManager.setName(name);
   }
+
+  /**
+   * [iOS only]
+   * @param peripheralId 
+   * @returns 
+   */
+  getMaximumWriteValueLengthForWithoutResponse(peripheralId: string) {
+    return new Promise<number>((fulfill, reject) => {
+      bleManager.getMaximumWriteValueLengthForWithoutResponse(peripheralId, (error: string | null, max: number) => {
+        if (error) {
+          reject(error);
+        } else {
+          fulfill(max);
+        }
+      });
+    });
+  }
+
+  /**
+   * [iOS only]
+   * @param peripheralId 
+   * @returns 
+   */
+  getMaximumWriteValueLengthForWithResponse(peripheralId: string) {
+    return new Promise<number>((fulfill, reject) => {
+      bleManager.getMaximumWriteValueLengthForWithResponse(peripheralId, (error: string | null, max: number) => {
+        if (error) {
+          reject(error);
+        } else {
+          fulfill(max);
+        }
+      });
+    });
+  }
+
 }
+
+
 
 export default new BleManager();

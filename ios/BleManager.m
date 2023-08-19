@@ -17,7 +17,7 @@ RCT_EXPORT_MODULE();
 @synthesize manager;
 @synthesize peripherals;
 @synthesize scanTimer;
-bool hasListeners;
+static bool hasListeners = NO;
 
 - (instancetype)init
 {
@@ -28,6 +28,7 @@ bool hasListeners;
         retrieveServicesLatches = [NSMutableDictionary new];
         readCallbacks = [NSMutableDictionary new];
         readRSSICallbacks = [NSMutableDictionary new];
+        readDescriptorCallbacks = [NSMutableDictionary new];
         retrieveServicesCallbacks = [NSMutableDictionary new];
         writeCallbacks = [NSMutableDictionary new];
         writeQueue = [NSMutableArray array];
@@ -95,7 +96,48 @@ bool hasListeners;
         [self invokeAndClearDictionary:readCallbacks withKey:key usingParameters:@[[NSNull null], ([characteristic.value length] > 0) ? [characteristic.value toArray] : [NSNull null]]];
     } else {
         if (hasListeners) {
-            [self sendEventWithName:@"BleManagerDidUpdateValueForCharacteristic" body:@{@"peripheral": peripheral.uuidAsString, @"characteristic":characteristic.UUID.UUIDString, @"service":characteristic.service.UUID.UUIDString, @"value": ([characteristic.value length] > 0) ? [characteristic.value toArray] : [NSNull null]}];
+            [self sendEventWithName:@"BleManagerDidUpdateValueForCharacteristic" body:@{@"peripheral": peripheral.uuidAsString, @"characteristic":characteristic.UUID.UUIDString.lowercaseString, @"service":characteristic.service.UUID.UUIDString.lowercaseString, @"value": ([characteristic.value length] > 0) ? [characteristic.value toArray] : [NSNull null]}];
+        }
+    }
+}
+
+- (void)peripheral:(CBPeripheral *)peripheral didUpdateValueForDescriptor:(nonnull CBDescriptor *)descriptor error:(nullable NSError *)error {
+    NSString *key = [self keyForPeripheral: peripheral andCharacteristic:descriptor.characteristic andDescriptor:descriptor];
+
+    if (error) {
+        NSLog(@"Error reading descriptor value for %@ on characteristic %@ :%@",
+                descriptor.UUID,
+                descriptor.characteristic.UUID,
+                error);
+        [self invokeAndClearDictionary:readDescriptorCallbacks withKey:key usingParameters:@[error, [NSNull null]]];
+        return;
+    }
+    NSLog(@"Read value [descriptor: %@, characteristic: %@]: (%lu) %@",
+            descriptor.UUID,
+            descriptor.characteristic.UUID,
+            [descriptor.value length],
+            descriptor.value);
+
+    NSMutableArray* peripheralReadDescriptorCallbacks = [readDescriptorCallbacks objectForKey:key];
+    if (peripheralReadDescriptorCallbacks != NULL) {
+        // The most future proof way of doing this that I could find, other option would be running strcmp on CBUUID strings
+        // https://developer.apple.com/documentation/corebluetooth/cbuuid/characteristic_descriptors
+        if ([descriptor.value isKindOfClass:[NSData class]]) {
+            [self invokeAndClearDictionary:readDescriptorCallbacks withKey:key usingParameters:@[[NSNull null], ([descriptor.value length] > 0) ? [descriptor.value toArray] : [NSNull null]]];
+        } else if ([descriptor.value isKindOfClass:[NSNumber class]]) {
+            NSMutableData *byteData = [NSMutableData new];
+            if (descriptor.value != nil) {
+                NSNumber *number = descriptor.value;
+                unsigned long long value = number.unsignedLongLongValue;
+                [byteData appendBytes:&value length:sizeof(value)];
+            }
+            [self invokeAndClearDictionary:readDescriptorCallbacks withKey:key usingParameters:@[[NSNull null], ([byteData length] > 0) ? [byteData toArray] : [NSNull null]]];
+        } else if ([descriptor.value isKindOfClass:[NSString class]]) {
+            NSData *byteData = [descriptor.value dataUsingEncoding:NSUTF8StringEncoding];
+            [self invokeAndClearDictionary:readDescriptorCallbacks withKey:key usingParameters:@[[NSNull null], ([byteData length] > 0) ? [byteData toArray] : [NSNull null]]];
+        } else {
+            NSLog(@"Unrecognized type of descriptor: (UUID: %@, value type: %@, value: %@)", descriptor.UUID, [descriptor.value class], descriptor.value);
+            [self invokeAndClearDictionary:readDescriptorCallbacks withKey:key usingParameters:@[[NSNull null], ([descriptor.value length] > 0) ? [descriptor.value toArray] : [NSNull null]]];
         }
     }
 }
@@ -107,7 +149,7 @@ bool hasListeners;
             return;
         }
         if (hasListeners) {
-            [self sendEventWithName:@"BleManagerDidUpdateNotificationStateFor" body:@{@"peripheral": peripheral.uuidAsString, @"characteristic": characteristic.UUID.UUIDString, @"isNotifying": @(false), @"domain": [error domain], @"code": @(error.code)}];
+            [self sendEventWithName:@"BleManagerDidUpdateNotificationStateFor" body:@{@"peripheral": peripheral.uuidAsString, @"characteristic": characteristic.UUID.UUIDString.lowercaseString, @"isNotifying": @(false), @"domain": [error domain], @"code": @(error.code)}];
         }
     }
     
@@ -136,14 +178,14 @@ bool hasListeners;
         }
     }
     if (hasListeners) {
-        [self sendEventWithName:@"BleManagerDidUpdateNotificationStateFor" body:@{@"peripheral": peripheral.uuidAsString, @"characteristic": characteristic.UUID.UUIDString, @"isNotifying": @(characteristic.isNotifying)}];
+        [self sendEventWithName:@"BleManagerDidUpdateNotificationStateFor" body:@{@"peripheral": peripheral.uuidAsString, @"characteristic": characteristic.UUID.UUIDString.lowercaseString, @"isNotifying": @(characteristic.isNotifying)}];
     }
 }
 
 
 
 
-- (NSString *) centralManagerStateToString: (int)state
+- (NSString *) centralManagerStateToString: (CBManagerState)state
 {
     switch (state) {
         case CBManagerStateUnknown:
@@ -211,7 +253,7 @@ bool hasListeners;
     @synchronized(peripherals) {
         for (CBPeripheral *p in peripherals) {
             
-            NSString* other = p.identifier.UUIDString;
+            NSString* other = p.identifier.UUIDString.lowercaseString;
             
             if ([uuid isEqualToString:other]) {
                 peripheral = p;
@@ -364,9 +406,11 @@ RCT_EXPORT_METHOD(scan:(NSArray *)serviceUUIDStrings timeoutSeconds:(nonnull NSN
     }
     [manager scanForPeripheralsWithServices:serviceUUIDs options:options];
     
-    dispatch_async(dispatch_get_main_queue(), ^{
-        self.scanTimer = [NSTimer scheduledTimerWithTimeInterval:[timeoutSeconds floatValue] target:self selector:@selector(stopScanTimer:) userInfo: nil repeats:NO];
-    });
+    if ([timeoutSeconds floatValue] > 0) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.scanTimer = [NSTimer scheduledTimerWithTimeInterval:[timeoutSeconds floatValue] target:self selector:@selector(stopScanTimer:) userInfo: nil repeats:NO];
+        });
+    }
     callback(@[]);
 }
 
@@ -410,7 +454,7 @@ RCT_EXPORT_METHOD(stopScan:(nonnull RCTResponseSenderBlock)callback)
     }
 }
 
-RCT_EXPORT_METHOD(connect:(NSString *)peripheralUUID callback:(nonnull RCTResponseSenderBlock)callback)
+RCT_EXPORT_METHOD(connect:(NSString *)peripheralUUID options:(NSDictionary *)options callback:(nonnull RCTResponseSenderBlock)callback)
 {
     NSLog(@"Connect");
     CBPeripheral *peripheral = [self findPeripheralByUUID:peripheralUUID];
@@ -729,6 +773,39 @@ RCT_EXPORT_METHOD(read:(NSString *)deviceUUID serviceUUID:(NSString*)serviceUUID
     
 }
 
+RCT_EXPORT_METHOD(getMaximumWriteValueLengthForWithResponse:(NSString *)deviceUUID callback:(nonnull RCTResponseSenderBlock)callback)
+{
+    NSLog(@"getMaximumWriteValueLengthForWithResponse");
+    
+    CBPeripheral *peripheral = [self findPeripheralByUUID:deviceUUID];
+    
+    if (peripheral && peripheral.state == CBPeripheralStateConnected) {
+        [self insertCallback:callback intoDictionary:readRSSICallbacks withKey:[peripheral uuidAsString]];
+        NSNumber *max = [NSNumber numberWithInteger:[peripheral maximumWriteValueLengthForType:(CBCharacteristicWriteWithResponse)]];
+        callback(@[[NSNull null], max]);
+    } else {
+        callback(@[@"Peripheral not found or not connected"]);
+    }
+    
+}
+
+RCT_EXPORT_METHOD(getMaximumWriteValueLengthForWithoutResponse:(NSString *)deviceUUID callback:(nonnull RCTResponseSenderBlock)callback)
+{
+    NSLog(@"getMaximumWriteValueLengthForWithoutResponse");
+    
+    CBPeripheral *peripheral = [self findPeripheralByUUID:deviceUUID];
+    
+    if (peripheral && peripheral.state == CBPeripheralStateConnected) {
+        [self insertCallback:callback intoDictionary:readRSSICallbacks withKey:[peripheral uuidAsString]];
+        NSNumber *max = [NSNumber numberWithInteger:[peripheral maximumWriteValueLengthForType:(CBCharacteristicPropertyWriteWithoutResponse)]];
+        callback(@[[NSNull null], max]);
+    } else {
+        callback(@[@"Peripheral not found or not connected"]);
+    }
+    
+}
+
+
 RCT_EXPORT_METHOD(readRSSI:(NSString *)deviceUUID callback:(nonnull RCTResponseSenderBlock)callback)
 {
     NSLog(@"readRSSI");
@@ -742,6 +819,36 @@ RCT_EXPORT_METHOD(readRSSI:(NSString *)deviceUUID callback:(nonnull RCTResponseS
         callback(@[@"Peripheral not found or not connected"]);
     }
     
+}
+
+RCT_EXPORT_METHOD(readDescriptor:(NSString *)deviceUUID serviceUUID:(NSString*)serviceUUID  characteristicUUID:(NSString*)characteristicUUID descriptorUUID:(NSString*)descriptorUUID callback:(nonnull RCTResponseSenderBlock)callback)
+{
+    NSLog(@"readDescriptor");
+
+    BLECommandContext *context = [self getData:deviceUUID serviceUUIDString:serviceUUID characteristicUUIDString:characteristicUUID prop:CBCharacteristicPropertyRead callback:callback];
+    if (context) {
+
+        CBPeripheral *peripheral = [context peripheral];
+        CBCharacteristic *characteristic = [context characteristic];
+        CBDescriptor *descriptor = [self findDescriptorFromUUID:[CBUUID UUIDWithString:descriptorUUID] characteristic:characteristic];
+        if (!descriptor) {
+            NSString* err = [NSString stringWithFormat:@"Could not find descriptor with UUID %@ on characteristic with UUID %@ on peripheral with UUID %@",
+                descriptorUUID,
+                characteristic.UUID,
+                peripheral.identifier.UUIDString];
+            NSLog(@"Could not find descriptor with UUID %@ on characteristic with UUID %@ on peripheral with UUID %@",
+                    descriptorUUID,
+                    characteristic.UUID,
+                    peripheral.identifier.UUIDString);
+            callback(@[err]);
+        } else {
+            NSString *key = [self keyForPeripheral: peripheral andCharacteristic:characteristic andDescriptor:descriptor];
+            [self insertCallback:callback intoDictionary:readDescriptorCallbacks withKey:key];
+
+            [peripheral readValueForDescriptor:descriptor];  // callback sends value
+        }
+    }
+
 }
 
 RCT_EXPORT_METHOD(retrieveServices:(NSString *)deviceUUID services:(NSArray<NSString *> *)services callback:(nonnull RCTResponseSenderBlock)callback)
@@ -932,6 +1039,13 @@ RCT_EXPORT_METHOD(requestMTU:(NSString *)deviceUUID mtu:(NSInteger)mtu callback:
             [self invokeAndClearDictionary:notificationCallbacks withKey:key usingParameters:@[errorStr]];
         }
     }
+
+    NSArray* ourReadDescriptorCallbacks = readDescriptorCallbacks.allKeys;
+    for (id key in ourReadDescriptorCallbacks) {
+        if ([key hasPrefix:peripheralUUIDString]) {
+            [self invokeAndClearDictionary:readDescriptorCallbacks withKey:key usingParameters:@[errorStr]];
+        }
+    }
     
     NSArray* ourStopNotificationsCallbacks = stopNotificationCallbacks.allKeys;
     for (id key in ourStopNotificationsCallbacks) {
@@ -977,14 +1091,37 @@ RCT_EXPORT_METHOD(requestMTU:(NSString *)deviceUUID mtu:(NSInteger)mtu callback:
     }
     NSLog(@"Characteristics For Service Discover");
     
-    NSString *peripheralUUIDString = [peripheral uuidAsString];
-    NSMutableSet *latch = [retrieveServicesLatches valueForKey:peripheralUUIDString];
-    [latch removeObject:service];
+    NSMutableSet *characteristicsForService = [NSMutableSet new];
+    [characteristicsForService addObjectsFromArray:service.characteristics];
+    [retrieveServicesLatches setObject:characteristicsForService forKey:service.UUID.UUIDString];
+
+    for (CBCharacteristic *characteristic in service.characteristics) {
+        [peripheral discoverDescriptorsForCharacteristic:characteristic];
+    }
+}
+
+- (void)peripheral:(CBPeripheral *)peripheral didDiscoverDescriptorsForCharacteristic:(nonnull CBCharacteristic *)characteristic error:(nullable NSError *)error {
+    if (error) {
+        NSLog(@"Error: %@", error);
+        return;
+    }
+    NSLog(@"Descriptor For Characteristic Discover");
     
-    if ([latch count] == 0) {
-        // Call success callback for connect
-        [self invokeAndClearDictionary:retrieveServicesCallbacks withKey:peripheralUUIDString usingParameters:@[[NSNull null], [peripheral asDictionary]]];
-        [retrieveServicesLatches removeObjectForKey:peripheralUUIDString];
+    NSString *peripheralUUIDString = [peripheral uuidAsString];
+    NSString *serviceUUIDString = characteristic.service.UUID.UUIDString;
+    NSMutableSet *peripheralLatch = [retrieveServicesLatches valueForKey:peripheralUUIDString];
+    NSMutableSet *serviceLatch = [retrieveServicesLatches valueForKey:serviceUUIDString];
+    [serviceLatch removeObject:characteristic];
+
+    if ([serviceLatch count] == 0) {
+        // All characteristics for this service have been checked
+        [peripheralLatch removeObject:characteristic.service];
+
+        if ([peripheralLatch count] == 0) {
+            // Call success callback for connect
+            [self invokeAndClearDictionary:retrieveServicesCallbacks withKey:peripheralUUIDString usingParameters:@[[NSNull null], [peripheral asDictionary]]];
+            [retrieveServicesLatches removeObjectForKey:peripheralUUIDString];
+        }
     }
 }
 
@@ -995,7 +1132,7 @@ RCT_EXPORT_METHOD(requestMTU:(NSString *)deviceUUID mtu:(NSInteger)mtu callback:
     for(int i=0; i < service.characteristics.count; i++)
     {
         CBCharacteristic *c = [service.characteristics objectAtIndex:i];
-        if ((c.properties & prop) != 0x0 && [c.UUID.UUIDString isEqualToString: UUID.UUIDString]) {
+        if ((c.properties & prop) != 0x0 && [c.UUID.UUIDString.lowercaseString isEqualToString: UUID.UUIDString.lowercaseString]) {
             NSLog(@"Found %@", UUID);
             return c;
         }
@@ -1010,12 +1147,26 @@ RCT_EXPORT_METHOD(requestMTU:(NSString *)deviceUUID mtu:(NSInteger)mtu callback:
     for(int i=0; i < service.characteristics.count; i++)
     {
         CBCharacteristic *c = [service.characteristics objectAtIndex:i];
-        if ([c.UUID.UUIDString isEqualToString: UUID.UUIDString]) {
+        if ([c.UUID.UUIDString.lowercaseString isEqualToString: UUID.UUIDString.lowercaseString]) {
             NSLog(@"Found %@", UUID);
             return c;
         }
     }
     return nil; //Characteristic not found on this service
+}
+
+-(CBDescriptor *) findDescriptorFromUUID:(CBUUID *)UUID characteristic:(CBCharacteristic*)characteristic
+{
+    NSLog(@"Looking for descriptor %@ on characteristic %@", UUID, characteristic.UUID);
+    for (int i=0; i < characteristic.descriptors.count; i++)
+    {
+        CBDescriptor *d = [characteristic.descriptors objectAtIndex:i];
+        if ([d.UUID.UUIDString isEqualToString: UUID.UUIDString]) {
+            NSLog(@"Found descriptor %@", UUID);
+            return d;
+        }
+    }
+    return nil; // Descriptor not found on this characteristic
 }
 
 - (void)centralManagerDidUpdateState:(CBCentralManager *)central
@@ -1048,10 +1199,10 @@ RCT_EXPORT_METHOD(requestMTU:(NSString *)deviceUUID mtu:(NSInteger)mtu callback:
     {
         NSString* err = [NSString stringWithFormat:@"Could not find service with UUID %@ on peripheral with UUID %@",
                          serviceUUIDString,
-                         peripheral.identifier.UUIDString];
+                         peripheral.identifier.UUIDString.lowercaseString];
         NSLog(@"Could not find service with UUID %@ on peripheral with UUID %@",
               serviceUUIDString,
-              peripheral.identifier.UUIDString);
+              peripheral.identifier.UUIDString.lowercaseString);
         callback(@[err]);
         return nil;
     }
@@ -1070,11 +1221,11 @@ RCT_EXPORT_METHOD(requestMTU:(NSString *)deviceUUID mtu:(NSInteger)mtu callback:
     
     if (!characteristic)
     {
-        NSString* err = [NSString stringWithFormat:@"Could not find characteristic with UUID %@ on service with UUID %@ on peripheral with UUID %@", characteristicUUIDString,serviceUUIDString, peripheral.identifier.UUIDString];
+        NSString* err = [NSString stringWithFormat:@"Could not find characteristic with UUID %@ on service with UUID %@ on peripheral with UUID %@", characteristicUUIDString,serviceUUIDString, peripheral.identifier.UUIDString.lowercaseString];
         NSLog(@"Could not find characteristic with UUID %@ on service with UUID %@ on peripheral with UUID %@",
               characteristicUUIDString,
               serviceUUIDString,
-              peripheral.identifier.UUIDString);
+              peripheral.identifier.UUIDString.lowercaseString);
         callback(@[err]);
         return nil;
     }
@@ -1089,6 +1240,10 @@ RCT_EXPORT_METHOD(requestMTU:(NSString *)deviceUUID mtu:(NSInteger)mtu callback:
 
 -(NSString *) keyForPeripheral: (CBPeripheral *)peripheral andCharacteristic:(CBCharacteristic *)characteristic {
     return [NSString stringWithFormat:@"%@|%@", [peripheral uuidAsString], [characteristic UUID]];
+}
+
+-(NSString *) keyForPeripheral: (CBPeripheral *)peripheral andCharacteristic:(CBCharacteristic *)characteristic andDescriptor:(CBDescriptor *)descriptor {
+    return [NSString stringWithFormat:@"%@|%@|%@", [peripheral uuidAsString], [characteristic UUID], [descriptor UUID]];
 }
 
 -(void)centralManager:(CBCentralManager *)central willRestoreState:(NSDictionary<NSString *,id> *)dict
